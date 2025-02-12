@@ -13,7 +13,7 @@ use ratatui::{
 };
 use serde::Deserialize;
 use std::fs::{File, OpenOptions};
-use std::io;
+use std::io::{self, Write};
 use std::path::Path;
 
 #[derive(Debug, Deserialize, Clone)]
@@ -27,6 +27,8 @@ pub struct App {
     pub items: Vec<Todo>,
     pub db: String,
     pub state: ListState,
+    pub input_mode: bool,
+    pub input_text: String,
 }
 
 impl App {
@@ -39,6 +41,8 @@ impl App {
             items,
             db: db_path.to_string(),
             state,
+            input_mode: false,
+            input_text: String::new(),
         }
     }
 
@@ -64,15 +68,34 @@ impl App {
         }
     }
 
-    pub fn add_task(&mut self, title: &str) {
-        let new_id = (self.items.len() as u32) + 1;
-        let new_todo = Todo {
-            id: new_id,
-            title: title.to_string(),
-            is_completed: false,
-        };
-        self.items.push(new_todo);
-        self.write_db();
+    pub fn add_task(&mut self) {
+        if !self.input_text.is_empty() {
+            let new_id = (self.items.len() as u32) + 1;
+            let new_todo = Todo {
+                id: new_id,
+                title: self.input_text.clone(),
+                is_completed: false,
+            };
+            self.items.push(new_todo);
+            self.write_db();
+            self.input_text.clear();
+        }
+        self.input_mode = false;
+    }
+
+    pub fn delete_task(&mut self) {
+        if let Some(selected) = self.state.selected() {
+            if selected < self.items.len() {
+                self.items.remove(selected);
+                self.write_db();
+                let new_index = if selected >= self.items.len() {
+                    0
+                } else {
+                    selected
+                };
+                self.state.select(Some(new_index));
+            }
+        }
     }
 
     fn write_db(&self) {
@@ -116,6 +139,20 @@ fn run<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<()> {
     loop {
         terminal.draw(|f| {
             let size = f.size();
+
+            let layout = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Min(1),
+                    Constraint::Length(3),
+                    if app.input_mode {
+                        Constraint::Length(3)
+                    } else {
+                        Constraint::Length(0)
+                    },
+                ])
+                .split(size);
+
             let block = Block::default().title(" TODO List ").borders(Borders::ALL);
             let items: Vec<ListItem> = app
                 .items
@@ -138,55 +175,50 @@ fn run<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<()> {
                     .add_modifier(Modifier::BOLD),
             );
 
-            let layout = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([Constraint::Min(1)].as_ref())
-                .split(size);
-
             f.render_stateful_widget(list, layout[0], &mut app.state);
+
+            let help_text =
+                Paragraph::new("↑ ↓: Move | Enter: Toggle | a: Add | d: Delete | q: Quit")
+                    .style(Style::default().fg(Color::Cyan))
+                    .block(Block::default().borders(Borders::TOP))
+                    .wrap(Wrap { trim: false });
+
+            f.render_widget(help_text, layout[1]);
+
+            if app.input_mode {
+                let input_block = Block::default().title(" Add Task ").borders(Borders::ALL);
+                let input_text = Paragraph::new(app.input_text.clone()).block(input_block);
+                f.render_widget(input_text, layout[2]);
+            }
         })?;
 
         if event::poll(std::time::Duration::from_millis(250))? {
             if let event::Event::Key(key) = event::read()? {
-                match key.code {
-                    KeyCode::Char('q') => break,
-                    KeyCode::Enter => app.toggle_complete(),
-                    KeyCode::Char('a') => {
-                        let mut input = String::new();
-                        loop {
-                            terminal.draw(|f| {
-                                let size = f.size();
-                                let input_block = Block::default()
-                                    .title("Enter New Todo: ")
-                                    .borders(Borders::ALL);
-                                let input_text = List::new(vec![ListItem::new(input.clone())])
-                                    .block(input_block)
-                                    .highlight_style(Style::default().fg(Color::Yellow));
-                                f.render_widget(input_text, size);
-                            })?;
-                            if let event::Event::Key(key) = event::read()? {
-                                match key.code {
-                                    KeyCode::Enter => {
-                                        if !input.trim().is_empty() {
-                                            app.add_task(&input);
-                                        }
-                                        break;
-                                    }
-                                    KeyCode::Esc => break,
-                                    KeyCode::Backspace => {
-                                        let _ = input.pop();
-                                    }
-                                    KeyCode::Char(c) => {
-                                        input.push(c);
-                                    }
-                                    _ => {}
-                                }
-                            }
+                if app.input_mode {
+                    match key.code {
+                        KeyCode::Enter => app.add_task(),
+                        KeyCode::Esc => {
+                            app.input_text.clear();
+                            app.input_mode = false;
                         }
+                        KeyCode::Backspace => {
+                            app.input_text.pop();
+                        }
+                        KeyCode::Char(c) => {
+                            app.input_text.push(c);
+                        }
+                        _ => {}
                     }
-                    KeyCode::Down => app.next(),
-                    KeyCode::Up => app.previous(),
-                    _ => {}
+                } else {
+                    match key.code {
+                        KeyCode::Char('q') => break,
+                        KeyCode::Enter => app.toggle_complete(),
+                        KeyCode::Char('a') => app.input_mode = true,
+                        KeyCode::Char('d') => app.delete_task(),
+                        KeyCode::Down => app.next(),
+                        KeyCode::Up => app.previous(),
+                        _ => {}
+                    }
                 }
             }
         }
