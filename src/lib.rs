@@ -177,11 +177,12 @@ fn run<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<()> {
 
             f.render_stateful_widget(list, layout[0], &mut app.state);
 
-            let help_text =
-                Paragraph::new("↑ ↓: Move | Enter: Toggle | a: Add | d: Delete | q: Quit")
-                    .style(Style::default().fg(Color::Cyan))
-                    .block(Block::default().borders(Borders::TOP))
-                    .wrap(Wrap { trim: false });
+            let help_text = Paragraph::new(
+                "↑ ↓ OR j k: Move | SpaceBar: Toggle | a: Add | d: Delete | q: Quit",
+            )
+            .style(Style::default().fg(Color::Cyan))
+            .block(Block::default().borders(Borders::TOP))
+            .wrap(Wrap { trim: false });
 
             f.render_widget(help_text, layout[1]);
 
@@ -212,11 +213,11 @@ fn run<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<()> {
                 } else {
                     match key.code {
                         KeyCode::Char('q') => break,
-                        KeyCode::Enter => app.toggle_complete(),
+                        KeyCode::Enter | KeyCode::Char(' ') => app.toggle_complete(),
                         KeyCode::Char('a') => app.input_mode = true,
                         KeyCode::Char('d') => app.delete_task(),
-                        KeyCode::Down => app.next(),
-                        KeyCode::Up => app.previous(),
+                        KeyCode::Down | KeyCode::Char('j') => app.next(),
+                        KeyCode::Up | KeyCode::Char('k') => app.previous(),
                         _ => {}
                     }
                 }
